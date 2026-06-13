@@ -1,0 +1,55 @@
+{
+  "model_name": "IAU 2006 (Vondrak 2011)",
+  "version": "2010",
+  "description": "IAU 2006 岁差模型完整系数，展开至 T^5 项，含行星摄动",
+  "units": "角度单位: 毫角秒/世纪^n (mas/cy^n)，除 ZETA/THETA/Z 为角秒/世纪^n",
+  "reference": "IERS Conventions 2010 Table 5.2a",
+
+  "omega_a_t0_arcsec": 84381.406,
+  "j2000_jd": 2451545.0,
+  "julian_century_days": 36525.0,
+
+  "psi_a_coeffs_mas": [0.0, 5038478.750, -1079.006, -1.140, 0.132, -0.0009],
+  "omega_a_coeffs_mas": [84381406.0, -46836.769, -0.183, 2.003, -0.000576, -0.0000434],
+  "chi_a_coeffs_mas": [0.0, 10552.600, -2380.640, -1.211, 0.170, -0.0000009],
+
+  "zeta_a_coeffs_arcsec": [0.0, 2.5976176, 0.01015026, -0.00002587, -0.000000022, 0.00000000006],
+  "theta_a_coeffs_arcsec": [0.0, 2004.3109, -0.8533041, -0.00021547, -0.000000195, -0.00000000017],
+  "z_a_coeffs_arcsec": [0.0, -2.5976176, 0.01015026, 0.00002562, -0.000000023, -0.00000000003],
+
+  "iau2000b_nutation_terms": [
+    {"l": 0.0, "lp": 0.0, "F": -2.0, "D": 2.0, "Om": -2.0, "dpsi_sin": -172064161.0, "deps_sin": -13170906.0, "dpsi_cos": 2062.0, "deps_cos": 8556.0},
+    {"l": 0.0, "lp": 0.0, "F": -2.0, "D": 0.0, "Om": 1.0, "dpsi_sin": -13187.0, "deps_sin": -1369.0, "dpsi_cos": 8166.0, "deps_cos": 573036.0},
+    {"l": 1.0, "lp": 0.0, "F": 0.0, "D": 0.0, "Om": 0.0, "dpsi_sin": -2274.0, "deps_sin": -207.0, "dpsi_cos": 3424.0, "deps_cos": 2798.0},
+    {"l": 0.0, "lp": 1.0, "F": 0.0, "D": 0.0, "Om": 0.0, "dpsi_sin": 2062.0, "deps_sin": 189.0, "dpsi_cos": -24.0, "deps_cos": -65.0},
+    {"l": -2.0, "lp": 0.0, "F": -2.0, "D": 2.0, "Om": -2.0, "dpsi_sin": 1426.0, "deps_sin": 123.0, "dpsi_cos": -517.0, "deps_cos": -301.0}
+  ],
+
+  "nutation_delaunay_rates_arcsec_per_cy": {
+    "l": 1717915922.633,
+    "lp": 129596581.224,
+    "F": 1739527262.847,
+    "D": 1602961601.029,
+    "Om": -6962890.266
+  },
+  "nutation_delaunay_constants_arcsec": {
+    "l": 485866.733,
+    "lp": 1287099.804,
+    "F": 335778.877,
+    "D": 1072261.307,
+    "Om": 450160.280
+  },
+
+  "proper_motion": {
+    "default_pm_ra_mas_per_yr": 0.0,
+    "default_pm_dec_mas_per_yr": 0.0,
+    "typical_mas_per_yr": {
+      "very_fast": 1000.0,
+      "fast": 100.0,
+      "medium": 10.0,
+      "slow": 1.0,
+      "very_slow": 0.1
+    },
+    "cos_dec_eps": 1e-6
+  }
+}
