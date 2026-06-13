@@ -542,3 +542,477 @@ pub fn spawn_eclipse_engine(
 
     (cmd_tx, event_rx)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_eclipse_config() -> EclipseConfig {
+        EclipseConfig {
+            model_name: "DE441-approx".into(),
+            version: "0.1".into(),
+            saros_cycle_yr: 18.0,
+            saros_cycle_days: 6585.32,
+            exeligmos_yr: 54.0,
+            synodic_month_days: 29.53059,
+            draconic_month_days: 27.21222,
+            anomalistic_month_days: 27.55455,
+            tropical_year_days: 365.2422,
+            earth_radius_km: 6371.0,
+            lunar_radius_km: 1737.4,
+            lunar_distance_perigee_km: 356500.0,
+            lunar_distance_apogee_km: 406700.0,
+            solar_apparent_radius_deg: 0.2666,
+            lunar_apparent_radius_perigee_deg: 0.2711,
+            lunar_apparent_radius_apogee_deg: 0.2437,
+            obliquity_deg: 23.4397,
+            lunar_inclination_deg: 5.145,
+            eclipse_season_days: 34.0,
+            solar_eclipse_latitude_limit_deg: 1.55,
+            lunar_eclipse_latitude_limit_deg: 0.92,
+            ut1_minus_tai_at_j2000_s: 0.0,
+            dt_polynomial_per_cent_sq_per_cy: 31.0,
+            channel_buffer_size: 32,
+        }
+    }
+
+    fn make_engine() -> EclipseEngine {
+        EclipseEngine::new(default_eclipse_config())
+    }
+
+    // ============================================================
+    // 正常用例（8 个）
+    // ============================================================
+
+    #[test]
+    fn test_compute_eclipse_year_1054() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(1054.0);
+
+        assert!(
+            !result.magnitude_predicted.is_nan() && result.magnitude_predicted.is_finite(),
+            "magnitude_predicted should be finite and not NaN"
+        );
+        assert!(
+            result.magnitude_predicted >= 0.0,
+            "magnitude_predicted should be >= 0"
+        );
+        assert!(
+            !result.eclipse_classification.is_empty(),
+            "eclipse_classification should not be empty"
+        );
+        assert!(
+            !result.delta_t_s.is_nan() && result.delta_t_s.is_finite(),
+            "delta_t_s should be finite"
+        );
+        assert!(
+            result.delta_t_s > 0.0,
+            "delta_t_s for year 1054 should be > 0"
+        );
+    }
+
+    #[test]
+    fn test_eclipse_magnitude_partial() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(150.0);
+
+        let valid_class = ["partial", "total", "annular", "none"].contains(&result.eclipse_classification.as_str());
+        assert!(valid_class, "classification should be one of partial/total/annular/none");
+
+        assert!(
+            !result.magnitude_predicted.is_nan() && result.magnitude_predicted.is_finite(),
+            "magnitude_predicted should be finite and not NaN"
+        );
+        assert!(
+            result.magnitude_predicted >= 0.0,
+            "magnitude_predicted should be >= 0"
+        );
+    }
+
+    #[test]
+    fn test_delta_t_estimation() {
+        let engine = make_engine();
+
+        let result_2000 = engine.compute_eclipse_for_year(2000.0);
+        assert!(
+            !result_2000.delta_t_s.is_nan() && result_2000.delta_t_s.is_finite(),
+            "delta_t_s for 2000 should be finite"
+        );
+        assert!(
+            result_2000.delta_t_s < 1.0,
+            "delta_t_s at J2000 should be near 0, got {}",
+            result_2000.delta_t_s
+        );
+
+        let result_1000 = engine.compute_eclipse_for_year(1000.0);
+        assert!(
+            !result_1000.delta_t_s.is_nan() && result_1000.delta_t_s.is_finite(),
+            "delta_t_s for 1000 should be finite"
+        );
+        assert!(
+            result_1000.delta_t_s > 2000.0,
+            "delta_t_s for year 1000 should be > 2000s, got {}",
+            result_1000.delta_t_s
+        );
+    }
+
+    #[test]
+    fn test_path_sampling_generation() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(1054.0);
+
+        let samples = result.path_samples_utm.unwrap();
+        assert!(
+            samples.len() >= 3 && samples.len() <= 20,
+            "path_samples_utm len should be in [3, 20], got {}",
+            samples.len()
+        );
+    }
+
+    #[test]
+    fn test_umbra_polygon_latlon() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(1054.0);
+
+        let polygon = result.umbra_polygon_latlon.unwrap();
+        assert!(
+            polygon.len() >= 10,
+            "umbra_polygon_latlon should have >= 10 points, got {}",
+            polygon.len()
+        );
+        for point in &polygon {
+            assert!(
+                point[0] >= -90.0 && point[0] <= 90.0,
+                "latitude {} out of [-90, 90]",
+                point[0]
+            );
+        }
+    }
+
+    #[test]
+    fn test_quality_score_range() {
+        let engine = make_engine();
+        let record = EclipseRecord {
+            id: 1,
+            eclipse_id_code: "test".into(),
+            dynasty_id: 1,
+            eclipse_type: "solar".into(),
+            year_ancient: None,
+            year_ce: 1054.0,
+            month_ancient: None,
+            day_ancient: None,
+            hour_ancient: None,
+            magnitude_desc: None,
+            magnitude_num: Some(0.85),
+            duration_desc: None,
+            duration_min: None,
+            ruxiu_du: None,
+            quji_du: None,
+            ra_deg: None,
+            dec_deg: None,
+            dynasty_name: None,
+            location_desc: None,
+            source_book: None,
+            record_text: None,
+        };
+        let result = engine.compute_for_record(&record);
+
+        assert!(
+            !result.overall_quality_score.is_nan() && result.overall_quality_score.is_finite(),
+            "quality_score should be finite"
+        );
+        assert!(
+            result.overall_quality_score >= 0.0 && result.overall_quality_score <= 1.0,
+            "quality_score should be in [0, 1], got {}",
+            result.overall_quality_score
+        );
+    }
+
+    #[test]
+    fn test_ecliptic_lon_range() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(1054.0);
+
+        assert!(
+            !result.lunar_ecliptic_lon_deg.is_nan() && result.lunar_ecliptic_lon_deg.is_finite(),
+            "lunar_ecliptic_lon_deg should be finite"
+        );
+        assert!(
+            !result.solar_ecliptic_lon_deg.is_nan() && result.solar_ecliptic_lon_deg.is_finite(),
+            "solar_ecliptic_lon_deg should be finite"
+        );
+        assert!(
+            result.lunar_ecliptic_lon_deg >= 0.0 && result.lunar_ecliptic_lon_deg <= 360.0,
+            "lunar_ecliptic_lon_deg should be in [0, 360], got {}",
+            result.lunar_ecliptic_lon_deg
+        );
+        assert!(
+            result.solar_ecliptic_lon_deg >= 0.0 && result.solar_ecliptic_lon_deg <= 360.0,
+            "solar_ecliptic_lon_deg should be in [0, 360], got {}",
+            result.solar_ecliptic_lon_deg
+        );
+    }
+
+    #[test]
+    fn test_eclipse_type_solar() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(1054.0);
+        assert_eq!(result.eclipse_type, "solar");
+    }
+
+    // ============================================================
+    // 边界用例（6 个）
+    // ============================================================
+
+    #[test]
+    fn test_eclipse_no_eclipse() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(2023.0);
+
+        assert!(
+            !result.magnitude_predicted.is_nan() && result.magnitude_predicted.is_finite(),
+            "magnitude_predicted should be finite"
+        );
+        assert!(
+            result.magnitude_predicted >= 0.0,
+            "magnitude_predicted should be >= 0"
+        );
+    }
+
+    #[test]
+    fn test_delta_t_j2000_exact() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(2000.0);
+
+        assert!(
+            !result.delta_t_s.is_nan() && result.delta_t_s.is_finite(),
+            "delta_t_s should be finite"
+        );
+        assert!(
+            result.delta_t_s < 10.0,
+            "delta_t_s at J2000 should be < 10s, got {}",
+            result.delta_t_s
+        );
+    }
+
+    #[test]
+    fn test_ancient_year_negative() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(-2000.0);
+
+        assert!(
+            !result.computed_midpoint_jd_et.is_nan() && result.computed_midpoint_jd_et.is_finite(),
+            "JD should be finite for year -2000"
+        );
+    }
+
+    #[test]
+    fn test_very_old_year() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(-5000.0);
+
+        assert!(
+            result.computed_midpoint_jd_et.is_finite(),
+            "JD should be finite for year -5000"
+        );
+        assert!(
+            result.magnitude_predicted.is_finite(),
+            "magnitude should be finite for year -5000"
+        );
+        assert!(
+            result.delta_t_s.is_finite(),
+            "delta_t should be finite for year -5000"
+        );
+        assert!(
+            result.solar_ecliptic_lon_deg.is_finite(),
+            "solar_lon should be finite for year -5000"
+        );
+    }
+
+    #[test]
+    fn test_future_year() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(3000.0);
+
+        assert!(
+            result.computed_midpoint_jd_et.is_finite(),
+            "JD should be finite for year 3000"
+        );
+        assert!(
+            result.magnitude_predicted.is_finite(),
+            "magnitude should be finite for year 3000"
+        );
+    }
+
+    #[test]
+    fn test_saros_number_reasonable() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(1054.0);
+
+        assert!(
+            result.saros_number >= -500 && result.saros_number <= 5000,
+            "saros_number should be in reasonable range, got {}",
+            result.saros_number
+        );
+    }
+
+    // ============================================================
+    // 异常/退化用例（6 个）
+    // ============================================================
+
+    #[test]
+    fn test_eclipse_very_large_year() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(100000.0);
+
+        assert!(
+            !result.magnitude_predicted.is_nan() && result.magnitude_predicted.is_finite(),
+            "magnitude_predicted should be finite for year 100000"
+        );
+        assert!(
+            !result.delta_t_s.is_nan() && result.delta_t_s.is_finite(),
+            "delta_t_s should be finite for year 100000"
+        );
+    }
+
+    #[test]
+    fn test_eclipse_year_zero() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(0.0);
+
+        assert!(
+            result.computed_midpoint_jd_et.is_finite(),
+            "JD should be finite for year 0"
+        );
+        assert!(
+            result.magnitude_predicted.is_finite(),
+            "magnitude should be finite for year 0"
+        );
+    }
+
+    #[test]
+    fn test_compute_for_record_missing_magnitude() {
+        let engine = make_engine();
+        let record = EclipseRecord {
+            id: 2,
+            eclipse_id_code: "missing_mag".into(),
+            dynasty_id: 1,
+            eclipse_type: "solar".into(),
+            year_ancient: None,
+            year_ce: 1054.0,
+            month_ancient: None,
+            day_ancient: None,
+            hour_ancient: None,
+            magnitude_desc: None,
+            magnitude_num: None,
+            duration_desc: None,
+            duration_min: None,
+            ruxiu_du: None,
+            quji_du: None,
+            ra_deg: None,
+            dec_deg: None,
+            dynasty_name: None,
+            location_desc: None,
+            source_book: None,
+            record_text: None,
+        };
+        let result = engine.compute_for_record(&record);
+
+        assert!(
+            result.magnitude_agreement_deviation.is_none(),
+            "magnitude_agreement_deviation should be None when record has no magnitude_num"
+        );
+        assert!(
+            !result.overall_quality_score.is_nan() && result.overall_quality_score.is_finite(),
+            "quality_score should be finite even without magnitude_num"
+        );
+    }
+
+    #[test]
+    fn test_compute_for_record_perfect_match() {
+        let engine = make_engine();
+
+        let first = engine.compute_eclipse_for_year(1054.0);
+        let matched_mag = first.magnitude_predicted;
+
+        let record = EclipseRecord {
+            id: 3,
+            eclipse_id_code: "perfect".into(),
+            dynasty_id: 1,
+            eclipse_type: "solar".into(),
+            year_ancient: None,
+            year_ce: 1054.0,
+            month_ancient: None,
+            day_ancient: None,
+            hour_ancient: None,
+            magnitude_desc: None,
+            magnitude_num: Some(matched_mag),
+            duration_desc: None,
+            duration_min: None,
+            ruxiu_du: None,
+            quji_du: None,
+            ra_deg: None,
+            dec_deg: None,
+            dynasty_name: None,
+            location_desc: None,
+            source_book: None,
+            record_text: None,
+        };
+        let result = engine.compute_for_record(&record);
+
+        let mag_dev = result.magnitude_agreement_deviation.unwrap();
+        assert!(
+            !mag_dev.is_nan() && mag_dev.is_finite(),
+            "magnitude_agreement_deviation should be finite"
+        );
+        assert!(
+            mag_dev < 1e-6,
+            "magnitude_agreement_deviation should be ~0 for perfect match, got {}",
+            mag_dev
+        );
+
+        assert!(
+            !result.overall_quality_score.is_nan() && result.overall_quality_score.is_finite(),
+            "quality_score should be finite"
+        );
+        assert!(
+            result.overall_quality_score >= 0.6,
+            "quality_score should be high for perfect match, got {}",
+            result.overall_quality_score
+        );
+    }
+
+    #[test]
+    fn test_obscuration_fraction_range() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(1054.0);
+
+        assert!(
+            !result.obscuration_fraction.is_nan() && result.obscuration_fraction.is_finite(),
+            "obscuration_fraction should be finite"
+        );
+        assert!(
+            result.obscuration_fraction >= 0.0 && result.obscuration_fraction <= 1.0,
+            "obscuration_fraction should be in [0, 1], got {}",
+            result.obscuration_fraction
+        );
+    }
+
+    #[test]
+    fn test_duration_positive_or_zero() {
+        let engine = make_engine();
+        let result = engine.compute_eclipse_for_year(1054.0);
+
+        if let Some(dur) = result.duration_total_s {
+            assert!(
+                !dur.is_nan() && dur.is_finite(),
+                "duration should be finite"
+            );
+            assert!(
+                dur >= 0.0,
+                "duration should be >= 0, got {}",
+                dur
+            );
+        }
+    }
+}
