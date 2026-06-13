@@ -1,0 +1,83 @@
+version: "3.9"
+
+networks:
+  star-net:
+    driver: bridge
+
+volumes:
+  postgis-data:
+
+services:
+  postgis:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: ancient-star-postgis
+    environment:
+      POSTGRES_DB: ancient_star
+      POSTGRES_USER: star_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U star_admin -d ancient_star"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "5432:5432"
+    networks:
+      - star-net
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    container_name: ancient-star-api
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://star_admin:${POSTGRES_PASSWORD}@postgis:5432/ancient_star
+      DB_HOST: postgis
+      DB_PORT: 5432
+      DB_NAME: ancient_star
+      DB_USER: star_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+      RUST_LOG: ${RUST_LOG:-info}
+      CONFIG_DIR: /app/config
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend/config:/app/config:ro
+    networks:
+      - star-net
+    restart: unless-stopped
+
+  simulator:
+    image: python:3.12-slim
+    container_name: ancient-star-simulator
+    working_dir: /app
+    volumes:
+      - ./database:/app/database
+      - ./backend/config:/app/config:ro
+    depends_on:
+      postgis:
+        condition: service_healthy
+    command: >
+      sh -c "pip install --no-cache-dir psycopg2-binary &&
+             python database/scripts/seed_data.py &&
+             python simulator/run_simulation.py --continuous"
+    environment:
+      DATABASE_URL: postgres://star_admin:${POSTGRES_PASSWORD}@postgis:5432/ancient_star
+      DB_HOST: postgis
+      DB_PORT: 5432
+      DB_NAME: ancient_star
+      DB_USER: star_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+    profiles:
+      - simulator
+    deploy:
+      replicas: 0
+    networks:
+      - star-net
