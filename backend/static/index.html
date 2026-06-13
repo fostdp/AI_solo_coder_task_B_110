@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>古代星表数据数字化与现代天体物理验证系统 v0.2</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- 加载遮罩 -->
+<div id="loading" class="loading-overlay">
+    <div class="loader"></div>
+    <div style="margin-top: 16px; color: #a0c8ff; font-size: 14px;">
+        系统启动中 · 加载天文数据
+    </div>
+</div>
+
+<!-- 顶部导航 -->
+<header class="top-bar">
+    <div class="brand">
+        <span class="logo">★</span>
+        <span>古代星表数字化与现代验证系统</span>
+    </div>
+    <div class="view-toggle">
+        <button data-view="sphere" class="active">天球视图</button>
+        <button data-view="flat">平面星图</button>
+        <button data-view="compare">对比模式</button>
+    </div>
+    <div class="top-controls">
+        <select id="display-select">
+            <option value="all">显示全部</option>
+            <option value="stars">仅恒星</option>
+            <option value="comets">仅彗星</option>
+            <option value="guests">仅客星</option>
+            <option value="snr">仅超新星遗迹</option>
+        </select>
+        <select id="style-select">
+            <option value="planck">黑体色温 (Planck)</option>
+            <option value="ancient">古代色彩</option>
+            <option value="modern">现代光谱型</option>
+        </select>
+        <label style="font-size:11px;color:#8090b0;">亮度阈值
+            <input type="range" id="mag-threshold" min="0" max="8" step="0.1" value="7" style="width:80px;">
+        </label>
+    </div>
+</header>
+
+<!-- 主内容 -->
+<main class="main-container">
+
+    <!-- 左侧筛选面板 -->
+    <aside id="side-panel" class="side-panel">
+        <button class="panel-close" onclick="toggleSidePanel()">&times;</button>
+
+        <section class="panel-section">
+            <h3>朝代筛选</h3>
+            <div id="dynasty-filter-list"></div>
+        </section>
+
+        <section class="panel-section">
+            <h3>数据筛选</h3>
+            <div class="form-row">
+                <label>典籍</label>
+                <select id="source-book-select">
+                    <option value="">全部</option>
+                    <option>甘石星经</option>
+                    <option>史记·天官书</option>
+                    <option>汉书·天文志</option>
+                    <option>开元占经</option>
+                    <option>新唐书·天文志</option>
+                    <option>宋史·天文志</option>
+                    <option>仪象考成</option>
+                    <option>仪象考成续编</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>星宿</label>
+                <select id="constellation-select">
+                    <option value="">全部</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>数据质量</label>
+                <select id="quality-select">
+                    <option value="0">全部</option>
+                    <option value="3">★★★ 高</option>
+                    <option value="2">★★ 中以上</option>
+                    <option value="1">★ 低以上</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>搜索星名</label>
+                <input type="text" id="star-search" placeholder="例如: 天一 / 北斗 / 天狼">
+            </div>
+        </section>
+
+        <section class="panel-section">
+            <h3>恒星列表 <span style="color:#8090b0;font-weight:normal;font-size:11px;" id="star-count"></span></h3>
+            <div id="stars-list" class="stars-list"></div>
+        </section>
+    </aside>
+
+    <button id="fab-side-toggle" class="fab-toggle" onclick="toggleSidePanel()" style="display:none;">☰</button>
+
+    <!-- 中央星图 -->
+    <section class="canvas-container">
+        <canvas id="star-canvas"></canvas>
+        <canvas id="labels-canvas"></canvas>
+
+        <!-- 天球图例 -->
+        <div class="sky-legend">
+            <div><span class="lg-dot" style="background:#f5f7ff;"></span>恒星</div>
+            <div><span class="lg-dot" style="background:#70c0ff;"></span>彗星</div>
+            <div><span class="lg-dot" style="background:#ff8080;"></span>客星(超新星)</div>
+            <div><span class="lg-dot" style="background:#c070ff;"></span>超新星遗迹</div>
+            <div><span style="color:#ffcc60;">→</span>自行方向</div>
+        </div>
+
+        <!-- 选中恒星浮动提示 -->
+        <div id="star-tooltip" class="star-tooltip" style="display:none;"></div>
+
+        <!-- 缩放按钮 -->
+        <div class="zoom-controls">
+            <button onclick="window.starField.zoom(1.25)">＋</button>
+            <button onclick="window.starField.zoom(0.8)">－</button>
+            <button onclick="window.starField.resetView()">◉</button>
+        </div>
+    </section>
+</main>
+
+<!-- 朝代时间轴 -->
+<footer class="timeline-footer">
+    <div class="timeline-header">
+        <div style="color:#a0c8ff;">朝代时间轴</div>
+        <div id="timeline-info" style="font-size:12px;color:#8090b0;">
+            当前：-
+        </div>
+        <button id="compare-btn">对比模式</button>
+    </div>
+    <div id="dynasty-timeline" class="timeline-scroll"></div>
+    <div class="timeline-hint">
+        单击切换朝代 · 双击加入对比 · 共 12 朝代
+    </div>
+</footer>
+
+<!-- 恒星详情面板 -->
+<div id="detail-panel" class="detail-panel" style="display:none;">
+    <div class="detail-header">
+        <span id="detail-title" style="font-size:16px;">恒星详情</span>
+        <span id="dynasty-tag" class="dynasty-tag">—</span>
+        <button class="close-btn" onclick="closeDetailPanel()">&times;</button>
+    </div>
+    <div id="detail-content" class="detail-content"></div>
+</div>
+
+<!-- 客星匹配面板 -->
+<div id="match-panel" class="match-panel" style="display:none;">
+    <div class="detail-header">
+        <span id="match-guest-name" style="font-size:16px;">客星证认</span>
+        <button class="close-btn" onclick="closeMatchPanel()">&times;</button>
+    </div>
+    <div class="detail-content">
+        <div class="detail-section">
+            <h3>客星信息</h3>
+            <div class="info-grid">
+                <div class="info-item"><span class="key">朝代：</span><span class="value" id="match-guest-dynasty">-</span></div>
+                <div class="info-item"><span class="key">峰值星等：</span><span class="value" id="match-guest-mag">-</span></div>
+                <div class="info-item"><span class="key">可见期：</span><span class="value" id="match-guest-days">-</span></div>
+                <div class="info-item"><span class="key">位置误差：</span><span class="value" id="match-guest-err">-</span></div>
+            </div>
+        </div>
+        <div class="detail-section">
+            <h3>贝叶斯候选匹配 (按后验概率排序)</h3>
+            <div id="matches-list"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 对比遮罩 -->
+<div class="compare-overlay"></div>
+
+<!-- Three.js -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<!-- 前端脚本 -->
+<script src="js/astro.js"></script>
+<script src="js/api.js"></script>
+<script src="js/star_chart_3d.js"></script>
+<script src="js/transient_panel.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
