@@ -1,0 +1,29 @@
+[package]
+name = "ancient-star-backend"
+version = "0.2.0"
+edition = "2021"
+description = "古代星表数字化与现代天体物理验证系统后端"
+
+[dependencies]
+actix-web = "4"
+actix-files = "0.6"
+actix-cors = "0.7"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+deadpool-postgres = "0.14"
+postgres-types = { version = "0.2", features = ["derive"] }
+dotenv = "0.15"
+rand = "0.8"
+tracing = { version = "0.1", features = ["log"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt", "time"] }
+prometheus = { version = "0.13", features = ["process"] }
+# 最小二乘与线性代数：仪器误差反演
+nalgebra = { version = "0.33", features = ["serde-serialize"] }
+# 额外数学函数：Lomb-Scargle 周期分析
+libm = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
