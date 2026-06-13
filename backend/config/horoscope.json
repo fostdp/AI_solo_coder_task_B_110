@@ -1,0 +1,37 @@
+{
+  "model_name": "personal_starmap_generator",
+  "version": "1.0.0",
+  "card": {
+    "width_px": 1080,
+    "height_px": 1920,
+    "title_font_family": "serif",
+    "body_font_family": "sans-serif",
+    "accent_color": "#ffd86b",
+    "background_gradient_from": "#050810",
+    "background_gradient_to": "#1a2040",
+    "star_density_multiplier": 1.2,
+    "mag_limit_for_labels": 4.5,
+    "label_font_size_px": 12
+  },
+  "location": {
+    "default_latitude_deg": 39.9042,
+    "default_longitude_deg": 116.4074,
+    "default_city_name": "北京",
+    "atmospheric_extinction_coeff_per_airmass": 0.16,
+    "min_altitude_for_plot_deg": -5.0
+  },
+  "epoch_alignment": {
+    "j2000_anchor_year": 2000.0,
+    "max_allowable_epoch_gap_yr_for_stars": 100.0,
+    "projection_stereographic_scale": 1.0
+  },
+  "zodiacal_lunar_mansions_inclusion": true,
+  "planet_ephemeris_approx": {
+    "mercury_synodic_days": 115.88,
+    "venus_synodic_days": 583.92,
+    "mars_synodic_days": 779.94,
+    "jupiter_synodic_days": 398.88,
+    "saturn_synodic_days": 378.09,
+    "mean_obliquity_deg": 23.4397
+  }
+}
