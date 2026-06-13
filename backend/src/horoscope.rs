@@ -656,3 +656,500 @@ pub fn spawn_horoscope_service(
 
     (cmd_tx, event_rx)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{
+        CardStyleConfig, EpochAlignmentConfig, LocationDefaults, PlanetApproxEphemeris,
+    };
+
+    fn make_test_config() -> HoroscopeConfig {
+        HoroscopeConfig {
+            model_name: "test".to_string(),
+            version: "0.1".to_string(),
+            card: CardStyleConfig {
+                width_px: 1080,
+                height_px: 1920,
+                title_font_family: "serif".to_string(),
+                body_font_family: "sans".to_string(),
+                accent_color: "#FFD700".to_string(),
+                background_gradient_from: "#000022".to_string(),
+                background_gradient_to: "#111144".to_string(),
+                star_density_multiplier: 1.0,
+                mag_limit_for_labels: 4.0,
+                label_font_size_px: 12,
+            },
+            location: LocationDefaults {
+                default_latitude_deg: 39.9042,
+                default_longitude_deg: 116.4074,
+                default_city_name: "北京".to_string(),
+                atmospheric_extinction_coeff_per_airmass: 0.2,
+                min_altitude_for_plot_deg: -5.0,
+            },
+            epoch_alignment: EpochAlignmentConfig {
+                j2000_anchor_year: 2000.0,
+                max_allowable_epoch_gap_yr_for_stars: 5000.0,
+                projection_stereographic_scale: 300.0,
+            },
+            zodiacal_lunar_mansions_inclusion: true,
+            planet_ephemeris_approx: PlanetApproxEphemeris {
+                mercury_synodic_days: 115.88,
+                venus_synodic_days: 583.92,
+                mars_synodic_days: 779.94,
+                jupiter_synodic_days: 398.88,
+                saturn_synodic_days: 378.09,
+                mean_obliquity_deg: 23.4397,
+            },
+        }
+    }
+
+    fn make_test_mansions() -> Vec<LunarMansion> {
+        let mut mansions = Vec::new();
+        let names = [
+            "角", "亢", "氐", "房", "心", "尾", "箕",
+            "斗", "牛", "女", "虚", "危", "室", "壁",
+            "奎", "娄", "胃", "昴", "毕", "觜", "参",
+            "井", "鬼", "柳", "星", "张", "翼", "轸",
+        ];
+        let step = 360.0 / 28.0;
+        for (i, name) in names.iter().enumerate() {
+            let start = i as f64 * step;
+            let end = (i + 1) as f64 * step;
+            mansions.push(LunarMansion {
+                id: i as i64 + 1,
+                mansion_order: i as i32 + 1,
+                name_cn: format!("{}宿", name),
+                name_pinyin: format!("xiu{}", i + 1),
+                ruxiu_width_deg: step,
+                ra_start_deg: start,
+                ra_end_deg: if i == 27 { 360.0 } else { end },
+            });
+        }
+        mansions
+    }
+
+    fn make_test_ancient_stars(n: usize) -> Vec<AncientStar> {
+        let mut stars = Vec::new();
+        for i in 0..n {
+            stars.push(AncientStar {
+                id: i as i64,
+                star_id_code: format!("T{:04}", i),
+                dynasty_id: 1,
+                mansion_id: None,
+                star_name_cn: format!("测试星{}", i),
+                star_name_alt: None,
+                constellation: None,
+                ruxiu_du: None,
+                quji_du: None,
+                ra_ancient_conv: None,
+                dec_ancient_conv: None,
+                ra_j2000: Some((i as f64 * 37.0) % 360.0),
+                dec_j2000: Some((i as f64 * 13.0) % 120.0 - 30.0),
+                magnitude_ancient: None,
+                magnitude_num: Some(1.0 + (i % 6) as f64),
+                color_desc: None,
+                color_class: None,
+                color_temp_k: Some(5000.0 + (i as f64 % 5.0) * 1000.0),
+                proper_motion_ra: None,
+                proper_motion_dec: None,
+                parallax: None,
+                source_book: None,
+                quality_flag: 0,
+                notes: None,
+                modern_hd_id: None,
+                cross_match_id: None,
+                dynasty_name: None,
+                mansion_name: None,
+                mansion_order: None,
+            });
+        }
+        stars
+    }
+
+    fn assert_finite(v: f64) {
+        assert!(v.is_finite(), "expected finite value, got {}", v);
+    }
+
+    fn assert_finite_pair((a, b): (f64, f64)) {
+        assert_finite(a);
+        assert_finite(b);
+    }
+
+    // ============ 1. 正常用例 (Normal) ============
+
+    #[test]
+    fn test_julian_day_known_date() {
+        let jd = HoroscopeEngine::julian_day_gregorian(2000, 1, 1, 12.0);
+        assert_finite(jd);
+        assert!((jd - 2451545.0).abs() < 0.001, "JD {} vs expected 2451545.0", jd);
+    }
+
+    #[test]
+    fn test_gmst_j2000() {
+        let jd = HoroscopeEngine::julian_day_gregorian(2000, 1, 1, 12.0);
+        let gmst = HoroscopeEngine::gmst_deg(jd);
+        assert_finite(gmst);
+        assert!(gmst >= 0.0 && gmst < 360.0, "GMST {}° out of [0,360)", gmst);
+        let d_from_j2000 = jd - JD2000;
+        let expected_hours = (6.697374558 + 24.06570982441908 * d_from_j2000) % 24.0;
+        let expected = (if expected_hours < 0.0 { expected_hours + 24.0 } else { expected_hours }) * 15.0;
+        assert!((gmst - expected).abs() < 2.0, "GMST {}° vs approx expected ~{}°", gmst, expected);
+    }
+
+    #[test]
+    fn test_sun_position_vernal_equinox() {
+        let jd = HoroscopeEngine::julian_day_gregorian(2023, 3, 21, 0.0);
+        let (lon, lat) = HoroscopeEngine::sun_ecliptic_position(jd);
+        assert_finite_pair((lon, lat));
+        let lon_norm = normalize_angle_360(lon);
+        let diff = if lon_norm > 180.0 { lon_norm - 360.0 } else { lon_norm };
+        assert!(diff.abs() < 15.0, "Sun lon {}° (norm {}) at vernal equinox, expected ~0°", lon, lon_norm);
+    }
+
+    #[test]
+    fn test_sun_position_summer_solstice() {
+        let jd = HoroscopeEngine::julian_day_gregorian(2023, 6, 21, 0.0);
+        let (lon, lat) = HoroscopeEngine::sun_ecliptic_position(jd);
+        assert_finite_pair((lon, lat));
+        assert!((lon - 90.0).abs() < 15.0, "Sun lon {}° at summer solstice, expected ~90°", lon);
+    }
+
+    #[test]
+    fn test_moon_latitude_range() {
+        for days in (0..365).step_by(7) {
+            let jd = 2451545.0 + days as f64;
+            let (_lon, lat) = HoroscopeEngine::moon_ecliptic_position(jd);
+            assert_finite(lat);
+            assert!(lat.abs() < 6.0, "Moon lat {}° exceeds ±6° on day {}", lat, days);
+        }
+    }
+
+    #[test]
+    fn test_ecliptic_to_equatorial_pole() {
+        let eps = 23.4397;
+        let (ra, dec) = HoroscopeEngine::ecliptic_to_equatorial(0.0, 90.0, eps);
+        assert_finite_pair((ra, dec));
+        let expected_dec = 90.0 - eps;
+        assert!((dec - expected_dec).abs() < 1.0, "Dec {}° vs expected ~{}°", dec, expected_dec);
+    }
+
+    #[test]
+    fn test_equatorial_to_horizontal_zenith() {
+        let lat = 39.9;
+        let lst = 0.0;
+        let ra = lst;
+        let dec = lat;
+        let (alt, az) = HoroscopeEngine::equatorial_to_horizontal(ra, dec, lst, lat);
+        assert_finite_pair((alt, az));
+        assert!(alt > 88.0, "Altitude {}° at zenith, expected ~90°", alt);
+    }
+
+    #[test]
+    fn test_stereographic_project_center() {
+        let (x, y) = HoroscopeEngine::stereographic_project(90.0, 0.0, 300.0);
+        assert_finite_pair((x, y));
+        assert!(x.abs() < 0.01, "x={} at zenith, expected ~0", x);
+        assert!(y.abs() < 0.01, "y={} at zenith, expected ~0", y);
+    }
+
+    #[test]
+    fn test_zodiac_sign_aries() {
+        let sign = HoroscopeEngine::zodiac_sign_from_ecliptic_lon(10.0);
+        assert_eq!(sign, "白羊座");
+    }
+
+    #[test]
+    fn test_zodiac_sign_libra() {
+        let sign = HoroscopeEngine::zodiac_sign_from_ecliptic_lon(190.0);
+        assert_eq!(sign, "天秤座");
+    }
+
+    #[test]
+    fn test_lunar_mansion_boundary() {
+        let mansions = make_test_mansions();
+        let result = HoroscopeEngine::lunar_mansion_from_ra(0.0, &mansions);
+        assert_finite(0.0);
+        assert!(!result.is_empty(), "Lunar mansion name should not be empty");
+    }
+
+    #[test]
+    fn test_lucky_star_filtering() {
+        let mut stars: Vec<StarmapStar> = Vec::new();
+        let mut alts: Vec<f64> = Vec::new();
+        let mut azs: Vec<f64> = Vec::new();
+
+        for i in 0..10 {
+            stars.push(StarmapStar {
+                star_id: Some(i as i64),
+                modern_name: Some(format!("S{}", i)),
+                ancient_name_cn: Some(format!("星{}", i)),
+                ra_j2000_deg: 0.0,
+                dec_j2000_deg: 0.0,
+                ra_at_birth_deg: 0.0,
+                dec_at_birth_deg: 0.0,
+                altitude_at_birth_deg: if i < 3 { 45.0 } else { 10.0 },
+                azimuth_at_birth_deg: 90.0,
+                projected_x: 0.0,
+                projected_y: 0.0,
+                apparent_magnitude: if i < 3 { 2.0 } else { 5.0 },
+                color_temp_k: None,
+                magnitude_ancient_desc: None,
+            });
+            alts.push(if i < 3 { 45.0 } else { 10.0 });
+            azs.push(90.0);
+        }
+
+        let lucky = HoroscopeEngine::lucky_star_pick(&stars, &alts, &azs);
+        assert_eq!(lucky.len(), 3, "Expected 3 lucky stars, got {}", lucky.len());
+    }
+
+    #[test]
+    fn test_generate_starmap_basic() {
+        let config = make_test_config();
+        let mut engine = HoroscopeEngine::new(config);
+        let request = PersonalStarmapRequest {
+            birth_year: 2000,
+            birth_month: 1,
+            birth_day: 1,
+            birth_hour_utc: Some(12.0),
+            latitude_deg: Some(39.9),
+            longitude_deg: Some(116.4),
+            city_name: Some("北京".to_string()),
+            projection_mode: Some("stereographic".to_string()),
+            card_style: None,
+            show_constellation_lines: Some(false),
+            show_moon_planets: Some(true),
+            show_lunar_mansions: Some(true),
+            mag_limit: Some(6.0),
+            compare_with_ancient_epoch: None,
+            generate_share_card: Some(true),
+        };
+        let stars = make_test_ancient_stars(50);
+        let mansions = make_test_mansions();
+        let resp = engine.generate(request, stars, mansions);
+
+        assert!(!resp.personal_info.city_name.is_empty());
+        assert!(resp.stars.len() > 0, "Expected some stars in response");
+    }
+
+    #[test]
+    fn test_ancient_modern_comparison() {
+        let config = make_test_config();
+        let mut engine = HoroscopeEngine::new(config);
+        let request = PersonalStarmapRequest {
+            birth_year: 2000,
+            birth_month: 1,
+            birth_day: 1,
+            birth_hour_utc: Some(12.0),
+            latitude_deg: Some(39.9),
+            longitude_deg: Some(116.4),
+            city_name: None,
+            projection_mode: None,
+            card_style: None,
+            show_constellation_lines: None,
+            show_moon_planets: None,
+            show_lunar_mansions: None,
+            mag_limit: None,
+            compare_with_ancient_epoch: Some(0.0),
+            generate_share_card: Some(false),
+        };
+        let stars = make_test_ancient_stars(20);
+        let mansions = make_test_mansions();
+        let resp = engine.generate(request, stars, mansions);
+
+        let diff = resp.ancient_comparison.expect("Ancient comparison should exist");
+        assert!(diff.avg_angular_shift_arcmin > 0.0, "Expected positive shift, got {}", diff.avg_angular_shift_arcmin);
+    }
+
+    // ============ 2. 边界用例 (Boundary) ============
+
+    #[test]
+    fn test_julian_day_very_old_date() {
+        let jd = HoroscopeEngine::julian_day_gregorian(-2000, 1, 1, 12.0);
+        assert_finite(jd);
+        assert!(!jd.is_nan() && !jd.is_infinite(), "JD should be finite, got {}", jd);
+    }
+
+    #[test]
+    fn test_stereographic_project_horizon() {
+        let scale = 300.0;
+        let (x, y) = HoroscopeEngine::stereographic_project(0.0, 0.0, scale);
+        assert_finite_pair((x, y));
+        let r = (x * x + y * y).sqrt();
+        assert!(r.is_finite() && r > scale * 1.5, "r={} at horizon, expected ~2*scale", r);
+    }
+
+    #[test]
+    fn test_stereographic_project_below_horizon() {
+        let (x, y) = HoroscopeEngine::stereographic_project(-10.0, 180.0, 300.0);
+        assert_finite_pair((x, y));
+        assert!(!x.is_nan() && !x.is_infinite(), "x should be finite, got {}", x);
+        assert!(!y.is_nan() && !y.is_infinite(), "y should be finite, got {}", y);
+    }
+
+    #[test]
+    fn test_airmass_at_zenith() {
+        let am = HoroscopeEngine::compute_airmass(90.0);
+        assert_finite(am);
+        assert!((am - 1.0).abs() < 0.001, "Airmass {} at zenith, expected 1.0", am);
+    }
+
+    #[test]
+    fn test_airmass_at_horizon() {
+        let am = HoroscopeEngine::compute_airmass(5.0);
+        assert_finite(am);
+        let z_rad = (85.0_f64).to_radians();
+        let expected = 1.0 / z_rad.cos();
+        assert!((am - expected).abs() < 3.0, "Airmass {} vs expected ~{} at alt=5°", am, expected);
+    }
+
+    #[test]
+    fn test_ecliptic_ra_deg_0_360_wrap() {
+        for lon in [-720.0, -360.0, -1.0, 0.0, 359.0, 360.0, 720.0, 1000.0] {
+            let (ra, dec) = HoroscopeEngine::ecliptic_to_equatorial(lon, 0.0, 23.4397);
+            assert_finite_pair((ra, dec));
+            assert!(ra >= 0.0 && ra <= 360.0, "RA {} out of [0,360] for lon={}", ra, lon);
+        }
+    }
+
+    #[test]
+    fn test_sun_position_full_year() {
+        let mut prev_lon: Option<f64> = None;
+        for month in 1..=12 {
+            let jd = HoroscopeEngine::julian_day_gregorian(2023, month, 15, 0.0);
+            let (lon, lat) = HoroscopeEngine::sun_ecliptic_position(jd);
+            assert_finite_pair((lon, lat));
+            let norm = normalize_angle_360(lon);
+            assert!(norm >= 0.0 && norm < 360.0, "Sun lon {} out of range", norm);
+            if let Some(prev) = prev_lon {
+                let delta = normalize_angle_180(norm - prev);
+                assert!(delta > 0.0, "Sun longitude should increase monotonically");
+            }
+            prev_lon = Some(norm);
+        }
+    }
+
+    // ============ 3. 异常/退化用例 (Abnormal/Degenerate) ============
+
+    #[test]
+    fn test_invalid_month_day_handling() {
+        let jd1 = HoroscopeEngine::julian_day_gregorian(2000, 0, 0, 12.0);
+        assert_finite(jd1);
+        let jd2 = HoroscopeEngine::julian_day_gregorian(2000, 15, 45, 12.0);
+        assert_finite(jd2);
+    }
+
+    #[test]
+    fn test_negative_latitude_out_of_range() {
+        let result = std::panic::catch_unwind(|| {
+            let (_alt, _az) = HoroscopeEngine::equatorial_to_horizontal(0.0, 0.0, 0.0, -95.0);
+        });
+        assert!(result.is_ok(), "Should not panic on out-of-range latitude");
+    }
+
+    #[test]
+    fn test_latitude_pole_90() {
+        let result = std::panic::catch_unwind(|| {
+            let (_alt, az) = HoroscopeEngine::equatorial_to_horizontal(0.0, 45.0, 0.0, 90.0);
+            assert_finite(az);
+        });
+        assert!(result.is_ok(), "Should not panic at North Pole");
+    }
+
+    #[test]
+    fn test_longitude_wrap_360() {
+        let jd = HoroscopeEngine::julian_day_gregorian(2000, 1, 1, 12.0);
+        for lon in [400.0, -100.0, 720.0, -400.0] {
+            let lst = HoroscopeEngine::local_sidereal_time_deg(jd, lon);
+            assert_finite(lst);
+            assert!(lst >= 0.0 && lst < 360.0, "LST {} out of [0,360) for lon={}", lst, lon);
+        }
+    }
+
+    #[test]
+    fn test_generate_empty_stars_list() {
+        let config = make_test_config();
+        let mut engine = HoroscopeEngine::new(config);
+        let request = PersonalStarmapRequest {
+            birth_year: 2000,
+            birth_month: 1,
+            birth_day: 1,
+            birth_hour_utc: Some(12.0),
+            latitude_deg: Some(39.9),
+            longitude_deg: Some(116.4),
+            city_name: None,
+            projection_mode: None,
+            card_style: None,
+            show_constellation_lines: None,
+            show_moon_planets: Some(false),
+            show_lunar_mansions: Some(false),
+            mag_limit: Some(6.0),
+            compare_with_ancient_epoch: None,
+            generate_share_card: Some(false),
+        };
+        let resp = engine.generate(request, vec![], make_test_mansions());
+        assert!(resp.stars.is_empty());
+    }
+
+    #[test]
+    fn test_all_stars_below_horizon() {
+        let mut stars: Vec<StarmapStar> = Vec::new();
+        let mut alts: Vec<f64> = Vec::new();
+        let mut azs: Vec<f64> = Vec::new();
+
+        for i in 0..10 {
+            stars.push(StarmapStar {
+                star_id: Some(i as i64),
+                modern_name: Some(format!("S{}", i)),
+                ancient_name_cn: Some(format!("星{}", i)),
+                ra_j2000_deg: 0.0,
+                dec_j2000_deg: 0.0,
+                ra_at_birth_deg: 0.0,
+                dec_at_birth_deg: 0.0,
+                altitude_at_birth_deg: -20.0,
+                azimuth_at_birth_deg: 90.0,
+                projected_x: 0.0,
+                projected_y: 0.0,
+                apparent_magnitude: 2.0,
+                color_temp_k: None,
+                magnitude_ancient_desc: None,
+            });
+            alts.push(-20.0);
+            azs.push(90.0);
+        }
+
+        let result = std::panic::catch_unwind(|| {
+            let lucky = HoroscopeEngine::lucky_star_pick(&stars, &alts, &azs);
+            assert!(lucky.is_empty(), "Expected no lucky stars, got {}", lucky.len());
+        });
+        assert!(result.is_ok(), "Should not panic with all stars below horizon");
+    }
+
+    #[test]
+    fn test_share_card_dimensions() {
+        let config = make_test_config();
+        let mut engine = HoroscopeEngine::new(config);
+        let request = PersonalStarmapRequest {
+            birth_year: 2000,
+            birth_month: 1,
+            birth_day: 1,
+            birth_hour_utc: Some(12.0),
+            latitude_deg: Some(39.9),
+            longitude_deg: Some(116.4),
+            city_name: None,
+            projection_mode: None,
+            card_style: None,
+            show_constellation_lines: None,
+            show_moon_planets: Some(false),
+            show_lunar_mansions: Some(false),
+            mag_limit: None,
+            compare_with_ancient_epoch: None,
+            generate_share_card: Some(true),
+        };
+        let resp = engine.generate(request, vec![], make_test_mansions());
+        let card = resp.share_card_spec.expect("Share card should exist");
+        assert_eq!(card.width_px, 1080, "Width should be 1080");
+        assert_eq!(card.height_px, 1920, "Height should be 1920");
+    }
+}
