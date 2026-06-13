@@ -191,10 +191,51 @@ impl EclipseEngine {
         JD2000 + t_years * 365.25
     }
 
-    /// 计算 ΔT: ΔT = 31.0 * T² 秒，T 为距 J2000 的儒略世纪数
+    /// 计算 ΔT（地球自转长期变化），使用分段经验公式
+    /// 参考 Stephenson & Morrison (2016) + IERS 经验模型
+    /// 分 5 个时期：-2000~-700 BCE, -700~1600 CE, 1600~1962, 1962~2020, 2020+
     fn compute_delta_t(&self, jd_et: f64) -> f64 {
-        let t_centuries = (jd_et - JD2000) / JULIAN_CENTURY;
-        self.config.dt_polynomial_per_cent_sq_per_cy * t_centuries * t_centuries
+        let year = 2000.0 + (jd_et - JD2000) / 365.25;
+        let y = (year - 2000.0) / 100.0;
+
+        if year < -700.0 {
+            let u = (year + 2000.0) / 100.0;
+            let dt = 31.0 * u * u - 4.0 * u + 20.0;
+            dt.max(0.0)
+        } else if year < 1600.0 {
+            let u = (year - 1000.0) / 100.0;
+            31.0 * u * u - 2.0 * u + 15.0
+        } else if year < 1962.0 {
+            let u = (year - 1850.0) / 100.0;
+            22.0 * u * u + 140.0 * u + 70.0
+        } else if year < 2020.0 {
+            let t = year - 2000.0;
+            63.86 + 0.3345 * t + 0.005328 * t * t + 0.0000132 * t * t * t
+        } else {
+            let u = (year - 2000.0) / 100.0;
+            31.0 * u * u + 65.0
+        }
+    }
+
+    /// 估算 ΔT 的不确定性（秒）
+    /// 古代数据不确定性大，现代数据精确
+    fn delta_t_uncertainty(&self, jd_et: f64) -> f64 {
+        let year = 2000.0 + (jd_et - JD2000) / 365.25;
+
+        if year < -700.0 {
+            500.0
+        } else if year < 500.0 {
+            200.0
+        } else if year < 1600.0 {
+            50.0
+        } else if year < 1962.0 {
+            5.0
+        } else if year < 2020.0 {
+            0.5
+        } else {
+            let t = year - 2020.0;
+            1.0 + t * 0.2
+        }
     }
 
     /// 计算日食/月食状态（简化模型：平均周期 + 二次偏差项）
