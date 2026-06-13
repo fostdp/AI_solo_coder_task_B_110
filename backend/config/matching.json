@@ -1,0 +1,78 @@
+{
+  "model_name": "Bayesian Spatial-Temporal Matcher v2",
+  "version": "2.0",
+  "description": "客星-超新星遗迹贝叶斯匹配模型，含银河系分布先验",
+
+  "default_config": {
+    "spatial_sigma_scale": 1.0,
+    "temporal_sigma_yr": 300.0,
+    "magnitude_sigma": 2.0,
+    "lightcurve_sigma_days": 30.0,
+    "min_sep_arcmin": 0.01
+  },
+
+  "galactic_prior": {
+    "description": "三维银河系盘先验: 径向指数盘 + 垂直等温盘",
+    "reference": "GRAVITY 2019 (R⊙=8.15 kpc), Strohmayer 2014 (sech² z-distribution)",
+    "r_sun_kpc": 8.15,
+    "r_disk_scale_kpc": 4.0,
+    "z_disk_scale_kpc": 0.05,
+    "prior_floor_log": -8.0,
+    "ngp_ra_deg": 192.8595,
+    "ngp_dec_deg": 27.1284,
+    "lon_cp_deg": 122.9320
+  },
+
+  "likelihood": {
+    "spatial": {
+      "model": "2D Gaussian (90%) + Cauchy (10%) mixture",
+      "snr_position_uncertainty_deg": 0.5,
+      "cauchy_scale_deg": 2.0
+    },
+    "temporal": {
+      "model": "Student-t",
+      "nu": 4.0,
+      "min_sigma_yr": 50.0
+    },
+    "magnitude": {
+      "model": "Student-t",
+      "nu": 5.0,
+      "min_sigma": 0.5,
+      "default_extinction_av": 1.5,
+      "default_extinction_err": 0.8,
+      "type_abs_magnitudes": {
+        "Ia": {"mean": -19.3, "sigma": 0.3},
+        "Ib": {"mean": -17.8, "sigma": 0.8},
+        "Ic": {"mean": -17.8, "sigma": 0.8},
+        "Ibc": {"mean": -17.8, "sigma": 0.8},
+        "II": {"mean": -16.8, "sigma": 1.2},
+        "IIP": {"mean": -16.8, "sigma": 1.2},
+        "IIL": {"mean": -16.8, "sigma": 1.2},
+        "IIn": {"mean": -16.8, "sigma": 1.2},
+        "default": {"mean": -17.5, "sigma": 1.5}
+      },
+      "multiband_bonus": {
+        "gamma_detected": 0.15,
+        "radio_and_xray_bright": 0.10,
+        "radio_bright_only": 0.05
+      }
+    },
+    "lightcurve": {
+      "model": "Student-t",
+      "nu": 4.0,
+      "min_sigma_days": 20.0,
+      "type_visibility_days": {
+        "Ia": 100,
+        "Ib": 80,
+        "Ic": 80,
+        "IIP": 120,
+        "IIL": 90,
+        "IIn": 90,
+        "II": 100,
+        "default": 80
+      }
+    }
+  },
+
+  "channel_buffer_size": 64
+}
