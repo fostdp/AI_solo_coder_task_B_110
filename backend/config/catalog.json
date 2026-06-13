@@ -1,0 +1,118 @@
+{
+  "model_name": "Ancient Star Catalog Loader",
+  "version": "1.0",
+  "description": "古代星表数据导入与清洗配置",
+
+  "data_sources": [
+    {
+      "name": "史记·天官书",
+      "dynasty": "汉",
+      "epoch_year": -100.0,
+      "quality_weight": 3
+    },
+    {
+      "name": "汉书·天文志",
+      "dynasty": "汉",
+      "epoch_year": 100.0,
+      "quality_weight": 3
+    },
+    {
+      "name": "晋书·天文志",
+      "dynasty": "晋",
+      "epoch_year": 300.0,
+      "quality_weight": 2
+    },
+    {
+      "name": "隋书·天文志",
+      "dynasty": "隋",
+      "epoch_year": 600.0,
+      "quality_weight": 2
+    },
+    {
+      "name": "旧唐书·天文志",
+      "dynasty": "唐",
+      "epoch_year": 725.0,
+      "quality_weight": 4
+    },
+    {
+      "name": "新唐书·天文志",
+      "dynasty": "唐",
+      "epoch_year": 1050.0,
+      "quality_weight": 4
+    },
+    {
+      "name": "宋史·天文志",
+      "dynasty": "宋",
+      "epoch_year": 1090.0,
+      "quality_weight": 5
+    },
+    {
+      "name": "辽史·历象志",
+      "dynasty": "辽",
+      "epoch_year": 1100.0,
+      "quality_weight": 2
+    },
+    {
+      "name": "金史·天文志",
+      "dynasty": "金",
+      "epoch_year": 1200.0,
+      "quality_weight": 2
+    },
+    {
+      "name": "元史·天文志",
+      "dynasty": "元",
+      "epoch_year": 1280.0,
+      "quality_weight": 5
+    },
+    {
+      "name": "明史·天文志",
+      "dynasty": "明",
+      "epoch_year": 1450.0,
+      "quality_weight": 5
+    },
+    {
+      "name": "崇祯历书",
+      "dynasty": "明",
+      "epoch_year": 1630.0,
+      "quality_weight": 5
+    },
+    {
+      "name": "仪象考成",
+      "dynasty": "清",
+      "epoch_year": 1750.0,
+      "quality_weight": 5
+    }
+  ],
+
+  "cleaning_rules": {
+    "max_ruxiu_du": 30.0,
+    "max_quji_du": 180.0,
+    "min_magnitude": -2.0,
+    "max_magnitude": 8.0,
+    "valid_color_descriptions": ["白", "青白", "青", "苍", "黄", "金黄", "赤", "红", "紫", "黑"],
+    "default_color_temp_k": 5770,
+    "quality_flag_thresholds": {
+      "excellent": 5,
+      "good": 4,
+      "fair": 3,
+      "poor": 2,
+      "unknown": 1
+    }
+  },
+
+  "lunar_mansions": {
+    "description": "二十八宿宿度配置，支持按朝代指定不同测量值",
+    "default_ra_offsets_deg": {
+      "角": 351.4, "亢": 363.3, "氐": 375.4, "房": 387.0,
+      "心": 396.2, "尾": 404.0, "箕": 414.8, "斗": 425.6,
+      "牛": 444.8, "女": 459.0, "虚": 470.8, "危": 480.9,
+      "室": 494.5, "壁": 510.6, "奎": 525.8, "娄": 542.3,
+      "胃": 555.2, "昴": 566.7, "毕": 578.7, "觜": 591.3,
+      "参": 599.7, "井": 616.0, "鬼": 638.4, "柳": 649.4,
+      "星": 658.7, "张": 667.3, "翼": 677.7, "轸": 691.6
+    }
+  },
+
+  "batch_size": 100,
+  "parallelism": 4
+}
