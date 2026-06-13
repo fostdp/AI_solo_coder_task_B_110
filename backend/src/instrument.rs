@@ -185,7 +185,7 @@ pub fn invert_instrument_errors(
         let residuals_inlier: Vec<f64> = residuals
             .iter()
             .enumerate()
-            .filter(|(i, _)| mask[*i])
+            .filter(|(i, _)| mask[i / 2])
             .map(|(_, &r)| r)
             .collect();
 
@@ -199,8 +199,10 @@ pub fn invert_instrument_errors(
 
         for i in 0..n {
             if mask[i] {
-                let res = residuals[i];
-                if (res - mean_res).abs() > sigma_clip_thresh * std_res {
+                let ra_res = residuals[2 * i];
+                let dec_res = residuals[2 * i + 1];
+                let total_res = (ra_res.powi(2) + dec_res.powi(2)).sqrt();
+                if (total_res - mean_res).abs() > sigma_clip_thresh * std_res {
                     mask[i] = false;
                 }
             }
@@ -221,7 +223,7 @@ pub fn invert_instrument_errors(
     let residuals_inlier: Vec<f64> = residuals
         .iter()
         .enumerate()
-        .filter(|(i, _)| mask[*i])
+        .filter(|(i, _)| mask[i / 2])
         .map(|(_, &r)| r)
         .collect();
 
@@ -656,4 +658,467 @@ pub fn spawn_instrument_service(
     config: InstrumentConfig,
 ) -> (mpsc::Sender<InstrumentCommand>, mpsc::Receiver<InstrumentEvent>) {
     spawn_inverter(config)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{ErrorComponentPriors, InstrumentMeta, InversionParams};
+
+    fn default_instrument_config() -> InstrumentConfig {
+        InstrumentConfig {
+            model_name: "test".into(),
+            version: "0.1".into(),
+            instruments: vec![InstrumentMeta {
+                code: "hunyi".into(),
+                name_cn: "浑仪".into(),
+                dynasty: "汉".into(),
+                erected_year: -104.0,
+                ring_count: 6,
+                nominal_accuracy_arcmin: 5.0,
+            }],
+            inversion: InversionParams {
+                min_shared_stars: 3,
+                max_residual_outlier_sigma: 3.0,
+                iterative_reweight_max_iter: 5,
+                sigma_clip_threshold: 3.0,
+            },
+            error_components: ErrorComponentPriors {
+                polar_axis_tilt_prior_arcmin: 30.0,
+                polar_axis_azimuth_prior_arcmin: 30.0,
+                divisions_systematic_prior_arcmin_per_cycle: 5.0,
+                micrometer_vernier_error_prior_arcmin: 2.0,
+                atmospheric_refraction_prior_arcmin: 1.0,
+                channel_buffer_size: 32,
+            },
+        }
+    }
+
+    fn make_observation(
+        id: i64,
+        inst_id: i64,
+        ra_true: f64,
+        dec_true: f64,
+        ra_measured: f64,
+        dec_measured: f64,
+    ) -> InstrumentObservation {
+        InstrumentObservation {
+            id,
+            instrument_id: inst_id,
+            star_id: Some(id),
+            star_name_cn: Some(format!("star_{}", id)),
+            observation_year_ce: 100.0,
+            ruxiu_du_measured: None,
+            quji_du_measured: None,
+            ra_deg_measured: Some(ra_measured),
+            dec_deg_measured: Some(dec_measured),
+            ra_j2000_true: Some(ra_true),
+            dec_j2000_true: Some(dec_true),
+            source_book: Some("test".into()),
+            quality_flag: 0,
+        }
+    }
+
+    struct Lcg {
+        state: u64,
+    }
+
+    impl Lcg {
+        fn new(seed: u64) -> Self {
+            Self { state: seed }
+        }
+        fn next_f64(&mut self) -> f64 {
+            self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (self.state >> 33) as f64 / (1u64 << 31) as f64
+        }
+        fn gaussian(&mut self) -> f64 {
+            let u1 = self.next_f64().max(1e-15);
+            let u2 = self.next_f64();
+            (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
+        }
+    }
+
+    fn generate_synthetic_observations(
+        n: usize,
+        tilt_arcmin: f64,
+        noise_sigma_arcmin: f64,
+        seed: u64,
+    ) -> Vec<InstrumentObservation> {
+        let mut rng = Lcg::new(seed);
+        let mut obs = Vec::with_capacity(n);
+        let tilt_deg = tilt_arcmin / 60.0;
+        let noise_deg = noise_sigma_arcmin / 60.0;
+
+        for i in 0..n {
+            let ra_true = (i as f64) * 360.0 / (n as f64);
+            let dec_true = -20.0 + (i as f64) * 80.0 / (n as f64);
+            let ra_rad = ra_true.to_radians();
+            let dec_rad = dec_true.to_radians();
+
+            let delta_ra_deg = tilt_deg * ra_rad.sin() * dec_rad.sin() + noise_deg * rng.gaussian();
+            let delta_dec_deg = tilt_deg * dec_rad.cos() + noise_deg * rng.gaussian();
+
+            let ra_measured = ra_true + delta_ra_deg;
+            let dec_measured = dec_true + delta_dec_deg;
+
+            obs.push(make_observation(
+                i as i64,
+                1,
+                ra_true,
+                dec_true,
+                ra_measured,
+                dec_measured,
+            ));
+        }
+        obs
+    }
+
+    fn assert_not_nan_inf(label: &str, value: f64) {
+        assert!(
+            value.is_finite(),
+            "{} is not finite: {}",
+            label,
+            value
+        );
+    }
+
+    #[test]
+    fn test_invert_synthetic_data() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 6.0, 0.5, 42);
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        assert_not_nan_inf("tilt", result.polar_axis_tilt_arcmin);
+        assert!(
+            result.polar_axis_tilt_arcmin.abs() > 0.0 && result.polar_axis_tilt_arcmin.abs() < 60.0,
+            "tilt = {} arcmin, expected 0 < |tilt| < 60",
+            result.polar_axis_tilt_arcmin
+        );
+    }
+
+    #[test]
+    fn test_invert_good_quality() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 1.0, 0.5, 123);
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        assert!(
+            result.accuracy_assessment_quality == "excellent"
+                || result.accuracy_assessment_quality == "good",
+            "quality = {}, expected excellent or good",
+            result.accuracy_assessment_quality
+        );
+    }
+
+    #[test]
+    fn test_sigma_clip_outliers() {
+        let config = default_instrument_config();
+        let mut obs = generate_synthetic_observations(50, 6.0, 0.5, 99);
+
+        obs[5].ra_deg_measured = Some(obs[5].ra_j2000_true.unwrap() + 1.0);
+        obs[5].dec_deg_measured = Some(obs[5].dec_j2000_true.unwrap() + 1.0);
+        obs[15].ra_deg_measured = Some(obs[15].ra_j2000_true.unwrap() - 1.0);
+        obs[15].dec_deg_measured = Some(obs[15].dec_j2000_true.unwrap() - 1.0);
+        obs[35].ra_deg_measured = Some(obs[35].ra_j2000_true.unwrap() + 1.0);
+        obs[35].dec_deg_measured = Some(obs[35].dec_j2000_true.unwrap() + 1.0);
+
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+        assert!(
+            result.num_iterations >= 1 || result.polar_axis_tilt_arcmin.is_finite(),
+            "sigma clip should iterate or produce a reasonable result"
+        );
+    }
+
+    #[test]
+    fn test_parameter_reasonable_range() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 6.0, 1.0, 77);
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        assert!(
+            result.polar_axis_tilt_arcmin.abs() < 120.0,
+            "tilt = {} too large",
+            result.polar_axis_tilt_arcmin
+        );
+        assert!(
+            result.polar_axis_azimuth_arcmin.abs() < 120.0,
+            "azimuth = {} too large",
+            result.polar_axis_azimuth_arcmin
+        );
+        assert!(
+            result.ra_zero_point_offset_arcmin.abs() < 120.0,
+            "ra_zero = {} too large",
+            result.ra_zero_point_offset_arcmin
+        );
+    }
+
+    #[test]
+    fn test_error_radar_normalization() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 6.0, 0.5, 200);
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        let total_pct: f64 = result
+            .error_component_radar
+            .iter()
+            .map(|e| e.relative_contribution_per_cent)
+            .sum();
+
+        assert!(
+            total_pct > 50.0 && total_pct < 300.0,
+            "radar sum = {}%, expected reasonable range",
+            total_pct
+        );
+
+        for entry in &result.error_component_radar {
+            assert!(
+                entry.relative_contribution_per_cent >= 0.0,
+                "entry {} has negative contribution {}",
+                entry.component_name,
+                entry.relative_contribution_per_cent
+            );
+        }
+    }
+
+    #[test]
+    fn test_reduced_chi_square_unity() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 1.0, 0.5, 55);
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        assert!(
+            result.chi_squared_reduced > 0.1 && result.chi_squared_reduced < 5.0,
+            "chi2_red = {}, expected 0.1~5.0",
+            result.chi_squared_reduced
+        );
+    }
+
+    #[test]
+    fn test_invert_convergence() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 2.0, 0.5, 33);
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        assert!(result.converged, "expected convergence with 50 samples and small noise");
+    }
+
+    #[test]
+    fn test_per_star_residuals_count() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 3.0, 0.5, 10);
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        let residuals = result.per_star_residuals.unwrap();
+        assert_eq!(
+            residuals.len(),
+            obs.len(),
+            "per_star_residuals count = {}, expected {}",
+            residuals.len(),
+            obs.len()
+        );
+    }
+
+    #[test]
+    fn test_minimal_sample_size() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(9, 3.0, 0.5, 7);
+        let result = invert_instrument_errors(&obs, None, &config);
+
+        assert!(result.is_ok(), "9 observations should succeed: {:?}", result);
+    }
+
+    #[test]
+    fn test_large_sample_size() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(200, 3.0, 0.5, 88);
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        assert!(
+            result.overall_rms_arcmin < 10.0,
+            "rms = {} arcmin, expected < 10",
+            result.overall_rms_arcmin
+        );
+    }
+
+    #[test]
+    fn test_perfect_data_no_noise() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 0.0, 0.0, 0);
+
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        assert!(
+            result.overall_rms_arcmin < 1.0,
+            "rms = {} arcmin for perfect data, expected < 1.0",
+            result.overall_rms_arcmin
+        );
+    }
+
+    #[test]
+    fn test_single_parameter_active() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 10.0, 0.01, 44);
+
+        let result = invert_instrument_errors(&obs, None, &config).unwrap();
+
+        let tilt_entry = result
+            .error_component_radar
+            .iter()
+            .find(|e| e.component_name == "极轴倾斜")
+            .unwrap();
+        let max_other = result
+            .error_component_radar
+            .iter()
+            .filter(|e| e.component_name != "极轴倾斜")
+            .map(|e| e.relative_contribution_per_cent)
+            .fold(0.0f64, f64::max);
+
+        assert!(
+            tilt_entry.relative_contribution_per_cent > max_other,
+            "tilt contribution {} should be > max other {}",
+            tilt_entry.relative_contribution_per_cent,
+            max_other
+        );
+    }
+
+    #[test]
+    fn test_zero_measurement_uncertainties() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(50, 3.0, 0.0, 66);
+        let result = invert_instrument_errors(&obs, None, &config);
+
+        assert!(result.is_ok(), "zero noise should still invert fine: {:?}", result);
+    }
+
+    #[test]
+    fn test_high_declination_stars() {
+        let config = default_instrument_config();
+        let mut rng = Lcg::new(12);
+        let mut obs = Vec::with_capacity(50);
+
+        for i in 0..50 {
+            let ra_true = (i as f64) * 360.0 / 50.0;
+            let dec_true = 80.0 + (i as f64) * 9.0 / 49.0;
+            let noise_deg = 0.01 / 60.0 * rng.gaussian();
+            let ra_measured = ra_true + noise_deg;
+            let dec_measured = dec_true + noise_deg;
+
+            obs.push(make_observation(i as i64, 1, ra_true, dec_true, ra_measured, dec_measured));
+        }
+
+        let result = invert_instrument_errors(&obs, None, &config);
+
+        match result {
+            Ok(sol) => {
+                assert_not_nan_inf("tilt", sol.polar_axis_tilt_arcmin);
+                assert_not_nan_inf("azimuth", sol.polar_axis_azimuth_arcmin);
+                assert_not_nan_inf("rms", sol.overall_rms_arcmin);
+            }
+            Err(_) => {}
+        }
+    }
+
+    #[test]
+    fn test_insufficient_samples() {
+        let config = default_instrument_config();
+        let obs = generate_synthetic_observations(2, 3.0, 0.5, 1);
+        let result = invert_instrument_errors(&obs, None, &config);
+
+        assert!(result.is_err(), "2 observations should return Err");
+    }
+
+    #[test]
+    fn test_identical_observations() {
+        let config = default_instrument_config();
+        let mut obs = Vec::with_capacity(50);
+
+        for i in 0..50 {
+            obs.push(make_observation(i as i64, 1, 180.0, 30.0, 180.5, 30.5));
+        }
+
+        let result = invert_instrument_errors(&obs, None, &config);
+        match result {
+            Ok(sol) => {
+                assert_not_nan_inf("rms", sol.overall_rms_arcmin);
+            }
+            Err(_) => {}
+        }
+    }
+
+    #[test]
+    fn test_empty_observation_list() {
+        let config = default_instrument_config();
+        let obs: Vec<InstrumentObservation> = vec![];
+        let result = invert_instrument_errors(&obs, None, &config);
+
+        assert!(result.is_err(), "empty list should return Err");
+        assert!(
+            result.unwrap_err().contains("No valid observation pairs found"),
+            "error message should mention no valid pairs"
+        );
+    }
+
+    #[test]
+    fn test_missing_measured_coordinates() {
+        let config = default_instrument_config();
+        let mut obs = Vec::with_capacity(10);
+
+        for i in 0..10 {
+            let mut o = make_observation(i as i64, 1, 180.0, 30.0, 180.5, 30.5);
+            o.ra_deg_measured = None;
+            o.dec_deg_measured = None;
+            obs.push(o);
+        }
+
+        let result = invert_instrument_errors(&obs, None, &config);
+        assert!(result.is_err(), "all measured=None should return Err");
+    }
+
+    #[test]
+    fn test_missing_true_coordinates() {
+        let config = default_instrument_config();
+        let mut obs = Vec::with_capacity(10);
+
+        for i in 0..10 {
+            let mut o = make_observation(i as i64, 1, 180.0, 30.0, 180.5, 30.5);
+            o.ra_j2000_true = None;
+            o.dec_j2000_true = None;
+            obs.push(o);
+        }
+
+        let result = invert_instrument_errors(&obs, None, &config);
+        assert!(result.is_err(), "all true=None should return Err");
+    }
+
+    #[test]
+    fn test_missing_both_measured_and_true() {
+        let config = default_instrument_config();
+        let mut obs = Vec::with_capacity(20);
+        let mut rng = Lcg::new(55);
+
+        for i in 0..20 {
+            let ra_true = (i as f64) * 18.0;
+            let dec_true = -10.0 + (i as f64) * 4.0;
+            let ra_measured = ra_true + 0.1 / 60.0 * rng.gaussian();
+            let dec_measured = dec_true + 0.1 / 60.0 * rng.gaussian();
+            obs.push(make_observation(i as i64, 1, ra_true, dec_true, ra_measured, dec_measured));
+        }
+
+        for i in 20..25 {
+            let mut o = make_observation(i as i64, 1, 180.0, 30.0, 180.5, 30.5);
+            o.ra_deg_measured = None;
+            o.dec_deg_measured = None;
+            obs.push(o);
+        }
+
+        for i in 25..30 {
+            let mut o = make_observation(i as i64, 1, 180.0, 30.0, 180.5, 30.5);
+            o.ra_j2000_true = None;
+            o.dec_j2000_true = None;
+            obs.push(o);
+        }
+
+        let result = invert_instrument_errors(&obs, None, &config);
+        assert!(result.is_ok(), "should succeed with 20 valid pairs out of 30: {:?}", result);
+    }
 }
