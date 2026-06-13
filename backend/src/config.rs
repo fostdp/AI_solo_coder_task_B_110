@@ -229,6 +229,7 @@ pub struct EclipseConfig {
     pub ut1_minus_tai_at_j2000_s: f64,
     pub dt_polynomial_per_cent_sq_per_cy: f64,
     pub channel_buffer_size: usize,
+    pub num_threads: Option<usize>,
 }
 
 // ============================================================
@@ -251,6 +252,7 @@ pub struct InversionParams {
     pub max_residual_outlier_sigma: f64,
     pub iterative_reweight_max_iter: i32,
     pub sigma_clip_threshold: f64,
+    pub regularization_lambda: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
