@@ -30,9 +30,13 @@ mod matching;
 mod models;
 mod db;
 mod variable_star;
+mod variability_analyzer;
 mod eclipse;
+mod eclipse_predictor;
 mod instrument;
+mod instrument_calibrator;
 mod horoscope;
+mod public_engagement;
 
 use actix_web::{web, App, HttpServer, HttpResponse, get, post, Responder};
 use actix_files::Files;
