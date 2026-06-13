@@ -1,0 +1,60 @@
+{
+  "model_name": "instrument_inversion",
+  "version": "1.0.0",
+  "instruments": [
+    {
+      "code": "hunyi_huntian",
+      "name_cn": "汉代落下闳浑仪",
+      "dynasty": "han",
+      "erected_year": -104.0,
+      "ring_count": 3,
+      "nominal_accuracy_arcmin": 30.0
+    },
+    {
+      "code": "hundong_zhangheng",
+      "name_cn": "张衡浑天仪",
+      "dynasty": "eastern_han",
+      "erected_year": 117.0,
+      "ring_count": 4,
+      "nominal_accuracy_arcmin": 20.0
+    },
+    {
+      "code": "hunyi_song",
+      "name_cn": "宋代皇祐浑仪",
+      "dynasty": "song",
+      "erected_year": 1050.0,
+      "ring_count": 5,
+      "nominal_accuracy_arcmin": 10.0
+    },
+    {
+      "code": "jianyi_guo",
+      "name_cn": "郭守敬简仪",
+      "dynasty": "yuan",
+      "erected_year": 1276.0,
+      "ring_count": 2,
+      "nominal_accuracy_arcmin": 3.0
+    },
+    {
+      "code": "hunyi_ming",
+      "name_cn": "明代正统浑仪",
+      "dynasty": "ming",
+      "erected_year": 1437.0,
+      "ring_count": 5,
+      "nominal_accuracy_arcmin": 8.0
+    }
+  ],
+  "inversion": {
+    "min_shared_stars": 5,
+    "max_residual_outlier_sigma": 3.0,
+    "iterative_reweight_max_iter": 5,
+    "sigma_clip_threshold": 2.5
+  },
+  "error_components": {
+    "polar_axis_tilt_prior_arcmin": 15.0,
+    "polar_axis_azimuth_prior_arcmin": 15.0,
+    "divisions_systematic_prior_arcmin_per_cycle": 5.0,
+    "micrometer_vernier_error_prior_arcmin": 2.0,
+    "atmospheric_refraction_prior_arcmin": 1.0,
+    "channel_buffer_size": 64
+  }
+}
